@@ -32,4 +32,8 @@ yarn-error.log*
 .DS_Store
 Thumbs.db
 .vscode/*
+# Project-level editor configuration worth sharing: these describe how the
+# project should be edited (Tailwind at-rules, the project's TypeScript), not
+# one person's preferences.
+!.vscode/settings.json
 !.vscode/extensions.json

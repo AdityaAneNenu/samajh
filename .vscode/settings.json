@@ -1,0 +1,24 @@
+{
+  // Tailwind CSS v4 is configured in CSS, with `@theme`, `@utility` and friends.
+  // VS Code's built-in CSS language service does not know those at-rules and
+  // reports each one as "Unknown at rule".
+  //
+  // The syntax is valid and is compiled correctly — verified by inspecting the
+  // build output, which contains the generated `--color-*` custom properties and
+  // the utilities built from them. Nothing needs fixing in app/globals.css.
+  //
+  // This silences that single lint rule. Every other CSS check stays on:
+  // unknown properties, invalid values and malformed declarations are still
+  // reported. Installing the Tailwind CSS IntelliSense extension (see
+  // extensions.json) provides full at-rule support instead.
+  "css.lint.unknownAtRules": "ignore",
+
+  // Keep the editor's TypeScript identical to the one `npm run typecheck` uses,
+  // so a diagnostic in the editor and a diagnostic in CI can never disagree.
+  // This does not disable any checking — it selects the project's own compiler,
+  // which is the version the build and the linter are tested against.
+  //
+  // One-time step after cloning: "TypeScript: Select TypeScript Version…" →
+  // "Use Workspace Version".
+  "typescript.tsdk": "node_modules/typescript/lib"
+}

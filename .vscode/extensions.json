@@ -1,0 +1,7 @@
+{
+  // Tailwind CSS IntelliSense understands Tailwind v4's at-rules (`@theme`,
+  // `@utility`, `@custom-variant`), which the built-in CSS language service does
+  // not. Recommended so those directives get completion and validation rather
+  // than an "Unknown at rule" warning.
+  "recommendations": ["bradlc.vscode-tailwindcss"]
+}
