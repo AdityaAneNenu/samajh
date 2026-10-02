@@ -1,0 +1,79 @@
+@import "tailwindcss";
+
+/*
+ * A deliberately plain palette: this is a tool people use when they are
+ * worried about a letter, so it should read like paper, not like a dashboard.
+ * No gradients, no glass, nothing that competes with the document's words.
+ */
+@theme {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  --font-serif: ui-serif, Georgia, Cambria, "Times New Roman", "Noto Serif", serif;
+
+  --color-paper: #fbfaf7;
+  --color-surface: #ffffff;
+  --color-ink: #1b1a18;
+  --color-muted: #5b5751;
+  --color-line: #e6e1d8;
+  --color-line-strong: #d5cec2;
+
+  --color-accent: #1d4ed8;
+  --color-accent-strong: #1e3a8a;
+  --color-accent-soft: #eef3ff;
+
+  --color-ok: #15803d;
+  --color-ok-soft: #eefbf1;
+
+  --color-warn: #9a3412;
+  --color-warn-soft: #fff5ed;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+
+  p {
+    text-wrap: pretty;
+  }
+
+  /* A visible focus ring on everything, because this app gets keyboard use
+     from people who grew up with keyboards. */
+  :focus-visible {
+    outline: 3px solid var(--color-accent);
+    outline-offset: 2px;
+    border-radius: 3px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+    }
+  }
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+
+  body {
+    background: #fff;
+    color: #000;
+    font-size: 12pt;
+  }
+
+  .print-block {
+    break-inside: avoid;
+  }
+}
