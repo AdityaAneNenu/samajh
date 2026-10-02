@@ -3,6 +3,7 @@ import { AiError } from "@/lib/errors";
 import { explainDocument, parseExplainInput } from "@/services/ai";
 import type { ModelConfig } from "@/services/ai/model";
 import type {
+  ChatContentPart,
   ChatMessage,
   ChatProvider,
   CompletionResult,
@@ -17,6 +18,7 @@ const CONFIG: ModelConfig = {
   maxRetries: 0,
   maxInputChars: 24_000,
   jsonMode: "off",
+  supportsImages: false,
 };
 
 const ENV_KEYS = ["AI_PROVIDER", "AI_BASE_URL", "AI_MODEL", "AI_API_KEY"] as const;
@@ -29,6 +31,22 @@ afterEach(() => {
     else process.env[key] = savedEnv[key];
   }
 });
+
+/** Flatten a message's content to text, so assertions read the same either way. */
+const textOf = (content: string | ChatContentPart[] | undefined): string => {
+  if (!content) return "";
+  if (typeof content === "string") return content;
+  return content
+    .map((part) => (part.type === "text" ? part.text : ""))
+    .filter((text) => text.length > 0)
+    .join("\n");
+};
+
+/** A stand-in photograph. Only its presence matters to these tests. */
+const PHOTO = {
+  mediaType: "image/jpeg" as const,
+  dataBase64: "A".repeat(200),
+};
 
 /** A provider that replies exactly what the test tells it to. */
 class ScriptedProvider implements ChatProvider {
@@ -126,8 +144,8 @@ describe("explainDocument", () => {
     await explainDocument(input({ language: "te" }), { provider, config: CONFIG });
 
     const sent = provider.calls[0] ?? [];
-    const system = sent.find((message) => message.role === "system")?.content ?? "";
-    const user = sent.find((message) => message.role === "user")?.content ?? "";
+    const system = textOf(sent.find((message) => message.role === "system")?.content);
+    const user = textOf(sent.find((message) => message.role === "user")?.content);
 
     expect(system).toContain("Explain, never advise");
     expect(system).toContain("copied EXACTLY");
@@ -212,8 +230,58 @@ describe("explainDocument", () => {
     const provider = new ScriptedProvider([GOOD_REPLY]);
     await explainDocument(input(), { provider, config: CONFIG });
 
-    const user = provider.calls[0]?.find((m) => m.role === "user")?.content ?? "";
+    const user = textOf(
+      provider.calls[0]?.find((m) => m.role === "user")?.content,
+    );
     expect(user).toContain("not provided");
+  });
+
+  it("refuses a photograph when the deployment reads text only", async () => {
+    const provider = new ScriptedProvider([GOOD_REPLY]);
+
+    await expect(
+      explainDocument(
+        { language: "en", image: PHOTO },
+        { provider, config: CONFIG },
+      ),
+    ).rejects.toMatchObject({ kind: "unsupported_input" });
+
+    // and it must not spend a call discovering that the model cannot see
+    expect(provider.calls).toHaveLength(0);
+  });
+
+  it("reads a photograph without pretending the quotes were checked", async () => {
+    const provider = new ScriptedProvider([GOOD_REPLY]);
+
+    const result = await explainDocument(
+      { language: "en", image: PHOTO },
+      { provider, config: { ...CONFIG, supportsImages: true } },
+    );
+
+    expect(result.groundingSkipped).toBe(true);
+    expect(result.quotesChecked).toBe(0);
+    expect(result.unverifiedQuotes).toBe(0);
+
+    // the photograph travels as a content part, not as a string
+    const user = provider.calls[0]?.find((m) => m.role === "user");
+    expect(Array.isArray(user?.content)).toBe(true);
+    const imagePart = (user?.content as ChatContentPart[]).find(
+      (part) => part.type === "image_url",
+    );
+    expect(imagePart?.type).toBe("image_url");
+  });
+
+  it("still checks every quote when a transcription accompanies the photograph", async () => {
+    const provider = new ScriptedProvider([GOOD_REPLY]);
+
+    const result = await explainDocument(
+      { text: DOCUMENT, language: "en", image: PHOTO },
+      { provider, config: { ...CONFIG, supportsImages: true } },
+    );
+
+    expect(result.groundingSkipped).toBe(false);
+    expect(result.quotesChecked).toBe(4);
+    expect(result.unverifiedQuotes).toBe(0);
   });
 
   it("reports a configuration error when no provider is set up", async () => {

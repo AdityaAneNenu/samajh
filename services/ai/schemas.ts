@@ -1,4 +1,10 @@
 import { z } from "zod";
+import {
+  IMAGE_MEDIA_TYPES,
+  MAX_IMAGE_BASE64_CHARS,
+  MAX_TEXT_CHARS,
+  MIN_TEXT_LENGTH,
+} from "@/lib/constants";
 import { LANGUAGE_CODES } from "@/lib/languages";
 
 /**
@@ -16,21 +22,51 @@ import { LANGUAGE_CODES } from "@/lib/languages";
 
 export const languageCodeSchema = z.enum(LANGUAGE_CODES);
 
-export const explainInputSchema = z.object({
-  /** The document's text — pasted, or extracted from an upload. */
-  text: z
-    .string()
-    .trim()
-    .min(40, "There isn't enough text here to read. Paste or add more of the document.")
-    .max(200_000, "This is far longer than a single document. Try one section at a time."),
-  /** The language the reader wants the explanation in. */
-  language: languageCodeSchema,
-  /**
-   * Optional, short note about the reader, e.g. "my mother, 68, in Hyderabad".
-   * Only ever used to pitch the explanation; never stored, never required.
-   */
-  readerContext: z.string().trim().max(300).optional(),
+export const imageSchema = z.object({
+  mediaType: z.enum(IMAGE_MEDIA_TYPES),
+  /** Base64 only — no data URL prefix. */
+  dataBase64: z.string().min(100).max(MAX_IMAGE_BASE64_CHARS),
 });
+
+export type ExplainImage = z.infer<typeof imageSchema>;
+
+export const explainInputSchema = z
+  .object({
+    /** The document's text — pasted, or extracted from an upload. */
+    text: z.string().trim().max(MAX_TEXT_CHARS).optional(),
+    /** A photograph of the document, for a vision-capable model. */
+    image: imageSchema.optional(),
+    /** The language the reader wants the explanation in. */
+    language: languageCodeSchema,
+    /**
+     * Optional, short note about the reader, e.g. "my mother, 68, in Hyderabad".
+     * Only ever used to pitch the explanation; never stored, never required.
+     */
+    readerContext: z.string().trim().max(300).optional(),
+  })
+  .superRefine((value, ctx) => {
+    // A photo on its own is a complete request. Text on its own must be long
+    // enough to actually read. Anything less gets a sentence, not a code.
+    if (value.image) return;
+
+    const length = (value.text ?? "").trim().length;
+    if (length === 0) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["text"],
+        message: "Add the text of the document, or a photo of it.",
+      });
+      return;
+    }
+    if (length < MIN_TEXT_LENGTH) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["text"],
+        message:
+          "There isn't enough text here to read. Paste or add more of the document.",
+      });
+    }
+  });
 
 export type ExplainInput = z.infer<typeof explainInputSchema>;
 
@@ -108,6 +144,16 @@ export interface ExplainResult
   elapsedMs: number;
   /** How many quotes were checked against the source document. */
   quotesChecked: number;
-  /** How many of those could not be found in the source. Should be 0. */
+  /**
+   * How many of those could not be found in the source. Should be 0.
+   *
+   * Always 0 when `groundingSkipped` is true — because nothing was checked.
+   */
   unverifiedQuotes: number;
+  /**
+   * True when the reading came from a photograph and no text was supplied, so
+   * quotes could not be checked against anything. The interface must say so
+   * rather than imply the usual verification happened.
+   */
+  groundingSkipped: boolean;
 }

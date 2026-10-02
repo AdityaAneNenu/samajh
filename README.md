@@ -50,6 +50,10 @@ it slowly — is checkable.**
 
 - **One screen, one flow.** Add the text, choose a language, press *Read it for me*. No
   accounts, no settings, no dashboards.
+- **Text or a photograph.** Paste the words, add a plain-text file, or photograph the page.
+  A photo is shrunk on the reader's own device before anything is sent anywhere. The photo box
+  appears only when the configured model can actually see, and when a reading comes from a
+  photo with no text to compare against, that is stated plainly rather than quietly passing.
 - **Plain-language explanation in 12 languages**, including Telugu, Hindi, Tamil, Bengali,
   Marathi, Kannada, Malayalam, Gujarati, Punjabi, Urdu and Spanish.
 - **Grounded output.** Model output is schema-validated, then every quote is verified
@@ -73,7 +77,7 @@ Not "AI-powered". The model does one specific job that rules cannot do: **turn a
 official prose into structured, grounded facts.**
 
 ```
-INPUT            Document text the reader pastes or uploads.
+INPUT            Document text the reader pastes or uploads, or a photograph of the page.
                  Plus the language they want, plus an optional short note about who they are.
 
 PREPROCESSING    Server-side only. Trim, validate, and clamp to AI_MAX_INPUT_CHARS so the
@@ -220,14 +224,18 @@ app/
   layout.tsx              App shell: landmarks, skip link, disclaimer, print styles
   page.tsx                Resolves AI status server-side, renders the reader
   globals.css             Design tokens, focus styles, reduced-motion, print rules
+  error.tsx               Error boundary: calm message, opaque code, retry
+  not-found.tsx           A friendly 404 that points back at the reader
   api/explain/route.ts    The only endpoint that touches a model
 components/
-  Reader.tsx              Client component: form, request, loading/error/empty states
+  Reader.tsx              Client component: form, photo, states, focus management
   ResultView.tsx          Presentational result — every section, including uncertainty
   Quote.tsx               A quote, plus its verified/unverified marking
 lib/
+  constants.ts            Every limit, shared by server and browser, zero deps
   errors.ts               AiError: kinds, user-facing messages, secret redaction
   grounding.ts            Quote verification against the source
+  image.ts                Browser-side photograph preparation (shrink, re-encode)
   json.ts                 Recover JSON from fences, prose and trailing commas
   format.ts               Plain-text rendering for copy and print
   http.ts                 Origin check, body-size guard, client identity
@@ -241,7 +249,9 @@ services/ai/
   schemas.ts              Zod contracts for input and output
   normalize.ts            Coerce near-miss model shapes before validation
   mock.ts                 Deterministic offline provider, honestly labelled as such
-tests/                    75 tests across 8 files
+docs/
+  dev-post-draft.md       The DEV Challenge write-up, staged and paste-ready
+tests/                    120 tests across 12 files
 ```
 
 ## Quickstart
@@ -272,6 +282,7 @@ model read the document. Use it to see the plumbing; use a real model to see the
 | `AI_BASE_URL` | yes¹ | — | OpenAI-compatible base URL, no trailing slash. |
 | `AI_MODEL` | yes¹ | — | The model id your provider serves. |
 | `AI_API_KEY` | yes¹ | — | Server-side credential. Never sent to the browser. |
+| `AI_SUPPORTS_IMAGES` | no | `false` | Set `true` only if `AI_MODEL` is vision-capable. Controls whether the photo input is offered at all. |
 | `AI_TIMEOUT_MS` | no | `45000` | Per-attempt timeout, after which the attempt aborts. |
 | `AI_MAX_RETRIES` | no | `2` | Retries for 429 / 5xx / timeout / network only. |
 | `AI_MAX_INPUT_CHARS` | no | `24000` | Hard ceiling on document text sent to the model. |
@@ -312,6 +323,11 @@ Error". Every failure has a kind, a plain sentence and a retry policy:
 **The failure detail never reaches the browser.** `AiError` carries a technical `detail`
 for the server log and a separate `userFacing` message for the screen, and the two are
 asserted to be different in the test suite.
+
+**If something unexpected breaks while rendering**, `app/error.tsx` catches it, shows a calm
+sentence and offers a retry — displaying only Next.js's opaque error digest, never the
+underlying message, which in production can contain internals. Unknown URLs land on a
+`not-found.tsx` that points back at the one page that matters.
 
 **And crucially: a bad model reply degrades the answer, it doesn't break the app.** If a
 reply contains nine good facts and one missing a quote, the normaliser drops the one and
@@ -361,17 +377,21 @@ This is the target user's requirement, not a checklist item:
 
 ## Testing
 
-**75 tests across 8 files**, all passing, with **no network access and no API key** — the
+**120 tests across 12 files**, all passing, with **no network access and no API key** — the
 provider is stubbed and the offline provider is real code.
 
 | File | Covers |
 | --- | --- |
-| `tests/ai.test.ts` | The orchestrator: happy path, prompt contents, fence handling, repair-on-invalid, double-failure, truncation, invented quotes, missing configuration |
+| `tests/ai.test.ts` | The orchestrator: happy path, prompt contents, fence handling, repair-on-invalid, double-failure, truncation, invented quotes, photographs, missing configuration |
+| `tests/route.test.ts` | The trust boundary: origin check, size cap, rate limiting, malformed JSON, field-level errors, the config error, image rejection |
 | `tests/provider.test.ts` | The wire format: request shape, retries, retry-then-succeed, no-retry-on-4xx, `response_format` fallback, credential redaction, empty completion, array content |
+| `tests/prompts.test.ts` | The safety rules: no advice, exact quotes or omission, gaps reported, photograph handling, exact JSON keys, wired into the prompt |
 | `tests/grounding.test.ts` | Quote verification: exact, whitespace, punctuation, ellipsis, invented quotes, per-item marking |
 | `tests/normalize.test.ts` | Near-miss shapes: snake_case, synonyms, half-filled items, bad confidence values |
 | `tests/json.test.ts` | Recovery of JSON from fences, prose and trailing commas |
 | `tests/errors.test.ts` | Status→kind mapping, retryability, message hygiene, secret redaction |
+| `tests/http.test.ts` | Same-origin enforcement, the body-size guard, client identity |
+| `tests/image.test.ts` | Accepted photo formats, base64 size arithmetic, human-readable sizes |
 | `tests/format.test.ts` | The plain-text rendering that gets copied and printed |
 | `tests/rateLimit.test.ts` | Window behaviour with an injected clock |
 
@@ -428,11 +448,12 @@ the configured key *and* any credential-shaped string, and is tested with a real
 
 Being explicit about the edges, because the brief matters more than the surface area:
 
-- **No photo or PDF input.** The UI accepts pasted text and `.txt` files. Photographing a
-  paper letter needs a vision-capable model and a content-part request body; the provider
-  adapter is the place that would change.
-- **No accounts, database, history or analytics.** Reported documents are financial and
-  medical. Storing them would be a liability, not a feature.
+- **No PDF input or built-in OCR.** Text is pasted or read from a plain-text file; photographs
+  go to a vision-capable model. A PDF has to be copied from, or its pages photographed, rather
+  than uploaded — which also keeps the many-headed problem of PDF text extraction out of a
+  two-day build.
+- **No accounts, database, history or analytics.** A reported document is a financial or
+  medical record. Storing it would be a liability, not a feature.
 - **No streaming.** The result is a structured object, not prose; there is nothing useful to
   stream, and the schema can only be validated once it is complete.
 - **The explanation is translated; the surrounding interface is not.** The chrome is English.

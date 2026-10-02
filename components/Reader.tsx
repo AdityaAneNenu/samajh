@@ -9,10 +9,13 @@ import {
   type FormEvent,
 } from "react";
 import { ResultView } from "./ResultView";
+import { MIN_TEXT_LENGTH } from "@/lib/constants";
+import { formatBytes, isAcceptedImage, prepareImage } from "@/lib/image";
 import { toPlainText } from "@/lib/format";
 import { DEFAULT_LANGUAGE, LANGUAGES } from "@/lib/languages";
 import type { AiStatus } from "@/services/ai";
 import type { ExplainResult } from "@/services/ai/schemas";
+import type { PreparedImage } from "@/lib/image";
 
 interface ApiIssue {
   field: string;
@@ -27,8 +30,7 @@ interface ApiErrorBody {
 
 type Phase = "idle" | "loading" | "done" | "error";
 
-/** Matches the server's minimum, so the form answers before a round trip. */
-const MIN_TEXT_LENGTH = 40;
+/** Matches the server's minimum (lib/constants), so the form answers first. */
 
 /** Shared button styling, so every control in the flow looks the same. */
 const BUTTON =
@@ -45,6 +47,8 @@ export function Reader({ status }: { status: AiStatus }) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [issues, setIssues] = useState<ApiIssue[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
+  const [photo, setPhoto] = useState<PreparedImage | null>(null);
+  const [photoBusy, setPhotoBusy] = useState(false);
 
   const resultRef = useRef<HTMLDivElement | null>(null);
   const errorRef = useRef<HTMLDivElement | null>(null);
@@ -59,8 +63,11 @@ export function Reader({ status }: { status: AiStatus }) {
   const maxChars = status.maxInputChars;
   const tooLong = maxChars !== null && text.length > maxChars;
   const trimmedLength = text.trim().length;
+  const hasEnoughText = trimmedLength >= MIN_TEXT_LENGTH;
+  // A photo on its own is a complete request; text on its own must be long
+  // enough to read. Mirrors the server's rule so the form answers first.
   const canSubmit =
-    status.ready && trimmedLength >= MIN_TEXT_LENGTH && phase !== "loading";
+    status.ready && (hasEnoughText || photo !== null) && phase !== "loading";
 
   const handleFile = useCallback(async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -83,6 +90,43 @@ export function Reader({ status }: { status: AiStatus }) {
     }
   }, []);
 
+  const handlePhoto = useCallback(
+    async (event: ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0];
+      // Allow the same file to be chosen twice in a row.
+      event.target.value = "";
+      if (!file) return;
+
+      setNotice(null);
+
+      if (!isAcceptedImage(file)) {
+        setNotice("That file is not a photo we can read. Try a JPEG, PNG or WebP.");
+        return;
+      }
+
+      setPhotoBusy(true);
+      try {
+        const prepared = await prepareImage(file);
+        if (!prepared.ok) {
+          setNotice(prepared.message);
+          return;
+        }
+        setPhoto(prepared.image);
+        setNotice(
+          `Photo ready — ${formatBytes(prepared.image.bytes)} will be sent when you press "Read it for me". Nothing has left this device yet.`,
+        );
+      } finally {
+        setPhotoBusy(false);
+      }
+    },
+    [],
+  );
+
+  const removePhoto = useCallback(() => {
+    setPhoto(null);
+    setNotice(null);
+  }, []);
+
   const handleSubmit = useCallback(
     async (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
@@ -92,9 +136,9 @@ export function Reader({ status }: { status: AiStatus }) {
       setErrorMessage(null);
       setNotice(null);
 
-      if (trimmedLength < MIN_TEXT_LENGTH) {
+      if (!hasEnoughText && photo === null) {
         setErrorMessage(
-          "There is not enough text here yet. Add a few lines from the document first.",
+          "There is not enough here yet. Add a few lines of the document, or a photo of it.",
         );
         setPhase("error");
         return;
@@ -108,9 +152,13 @@ export function Reader({ status }: { status: AiStatus }) {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
-            text,
+            text: text.trim() === "" ? undefined : text,
+            image: photo
+              ? { mediaType: photo.mediaType, dataBase64: photo.dataBase64 }
+              : undefined,
             language,
-            readerContext: readerContext.trim() === "" ? undefined : readerContext.trim(),
+            readerContext:
+              readerContext.trim() === "" ? undefined : readerContext.trim(),
           }),
         });
 
@@ -138,7 +186,7 @@ export function Reader({ status }: { status: AiStatus }) {
         setPhase("error");
       }
     },
-    [language, phase, readerContext, text, trimmedLength],
+    [hasEnoughText, language, phase, photo, readerContext, text],
   );
 
   const handleCopy = useCallback(async () => {
@@ -161,10 +209,22 @@ export function Reader({ status }: { status: AiStatus }) {
           A letter you do not fully understand?
         </h1>
         <p className="max-w-prose text-base leading-relaxed text-muted">
-          Put the words from the document below, or add the text file, and press
-          &ldquo;Read it for me&rdquo;. You will get what the document is, what
-          it asks of you and by when, and the exact lines each answer came from
-          &mdash; in the language you are comfortable reading.
+          {status.supportsImages ? (
+            <>
+              Put the words from the document below, or add a photo of it, and
+              press &ldquo;Read it for me&rdquo;. You will get what the document
+              is, what it asks of you and by when, and the exact lines each
+              answer came from &mdash; in the language you are comfortable
+              reading.
+            </>
+          ) : (
+            <>
+              Put the words from the document below and press &ldquo;Read it for
+              me&rdquo;. You will get what the document is, what it asks of you
+              and by when, and the exact lines each answer came from &mdash; in
+              the language you are comfortable reading.
+            </>
+          )}
         </p>
       </div>
 
@@ -220,6 +280,60 @@ export function Reader({ status }: { status: AiStatus }) {
           </p>
         </div>
 
+        {status.supportsImages && (
+          <div>
+            <label
+              htmlFor="document-photo"
+              className="block text-sm font-medium text-ink"
+            >
+              Or add a photo of the document
+            </label>
+            <p id="document-photo-hint" className="mt-1 text-sm text-muted">
+              A clear photo of the whole page works best. It is shrunk on your
+              own device before anything is sent anywhere.
+            </p>
+            <input
+              id="document-photo"
+              name="photo"
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              capture="environment"
+              onChange={handlePhoto}
+              aria-describedby="document-photo-hint"
+              className="mt-2 block w-full text-sm text-muted file:mr-3 file:rounded-md file:border file:border-line-strong file:bg-surface file:px-3 file:py-2 file:text-sm file:font-medium file:text-ink"
+            />
+
+            {photoBusy && (
+              <p role="status" className="mt-2 text-xs text-muted">
+                Preparing the photo&hellip;
+              </p>
+            )}
+
+            {photo && (
+              <div className="mt-3 flex items-center gap-3">
+                {/* A data URL is the only sensible source here, so next/image
+                    would add cost with no benefit. */}
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={`data:${photo.mediaType};base64,${photo.dataBase64}`}
+                  alt="The photograph of the document that will be read"
+                  className="h-20 w-20 rounded border border-line object-cover"
+                />
+                <div className="text-xs text-muted">
+                  <p>{formatBytes(photo.bytes)} ready to send.</p>
+                  <button
+                    type="button"
+                    onClick={removePhoto}
+                    className="mt-1 font-medium text-accent-strong underline"
+                  >
+                    Remove this photo
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         <div>
           <label
             htmlFor="document-file"
@@ -236,8 +350,9 @@ export function Reader({ status }: { status: AiStatus }) {
             className="mt-2 block w-full text-sm text-muted file:mr-3 file:rounded-md file:border file:border-line-strong file:bg-surface file:px-3 file:py-2 file:text-sm file:font-medium file:text-ink"
           />
           <p className="mt-1 text-xs text-muted">
-            This setup reads text. Photographing a paper letter needs a model
-            that can see — see the README.
+            {status.supportsImages
+              ? "Plain text only — .txt, .md or .csv. For a photograph, use the photo box above."
+              : "Plain text only. Photographing a paper letter needs a model that can see — see the README."}
           </p>
         </div>
 
@@ -298,10 +413,10 @@ export function Reader({ status }: { status: AiStatus }) {
           >
             {phase === "loading" ? "Reading…" : "Read it for me"}
           </button>
-          {trimmedLength < MIN_TEXT_LENGTH && phase !== "loading" && (
+          {!canSubmit && phase !== "loading" && status.ready && (
             <p className="text-sm text-muted">
-              Add at least {MIN_TEXT_LENGTH} characters of the document to
-              begin.
+              Add at least {MIN_TEXT_LENGTH} characters of the document
+              {status.supportsImages ? ", or a photo of it," : ""} to begin.
             </p>
           )}
         </div>
@@ -384,6 +499,7 @@ export function Reader({ status }: { status: AiStatus }) {
               type="button"
               onClick={() => {
                 setResult(null);
+                setPhoto(null);
                 setPhase("idle");
               }}
               className={BUTTON}

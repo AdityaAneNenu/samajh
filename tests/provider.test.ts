@@ -12,6 +12,7 @@ const CONFIG: ModelConfig = {
   maxRetries: 1,
   maxInputChars: 1_000,
   jsonMode: "auto",
+  supportsImages: false,
 };
 
 const CONVERSATION = [{ role: "system" as const, content: "read this" }];

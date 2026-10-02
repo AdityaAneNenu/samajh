@@ -12,9 +12,17 @@ import type { ModelConfig } from "./model";
  * you run yourself — is an environment change, not a code change.
  */
 
+export type ChatContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string } };
+
 export interface ChatMessage {
   role: "system" | "user" | "assistant";
-  content: string;
+  /**
+   * A plain string, or an array of parts when a photograph is involved. The
+   * OpenAI-compatible content-parts shape carries images as a data URL.
+   */
+  content: string | ChatContentPart[];
 }
 
 export interface CompletionResult {

@@ -39,6 +39,7 @@ const RESULT: ExplainResult = {
   elapsedMs: 1234,
   quotesChecked: 3,
   unverifiedQuotes: 1,
+  groundingSkipped: false,
 };
 
 describe("toPlainText", () => {

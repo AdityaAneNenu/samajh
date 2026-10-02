@@ -21,6 +21,14 @@ export interface ModelConfig {
   maxRetries: number;
   maxInputChars: number;
   jsonMode: JsonMode;
+  /**
+   * Whether `AI_MODEL` can actually read an image through this API.
+   *
+   * Defaults to false on purpose. Offering a photo box that the configured
+   * model cannot use would be worse than not offering one at all, so the
+   * interface only shows it when the operator has said the model can see.
+   */
+  supportsImages: boolean;
 }
 
 const numeric = (fallback: number) =>
@@ -32,11 +40,21 @@ const numeric = (fallback: number) =>
       return Number.isFinite(n) && n > 0 ? n : fallback;
     });
 
+const booleanFlag = (fallback: boolean) =>
+  z
+    .string()
+    .optional()
+    .transform((v) => {
+      if (v === undefined || v.trim() === "") return fallback;
+      return ["1", "true", "yes", "on"].includes(v.trim().toLowerCase());
+    });
+
 const envSchema = z.object({
   AI_PROVIDER: z.enum(["openai-compatible", "mock"]).default("openai-compatible"),
   AI_BASE_URL: z.string().trim().optional(),
   AI_MODEL: z.string().trim().optional(),
   AI_API_KEY: z.string().trim().optional(),
+  AI_SUPPORTS_IMAGES: booleanFlag(false),
   AI_TIMEOUT_MS: numeric(45_000),
   AI_MAX_RETRIES: numeric(2),
   AI_MAX_INPUT_CHARS: numeric(24_000),
@@ -49,6 +67,7 @@ function readEnv() {
     AI_BASE_URL: process.env.AI_BASE_URL,
     AI_MODEL: process.env.AI_MODEL,
     AI_API_KEY: process.env.AI_API_KEY,
+    AI_SUPPORTS_IMAGES: process.env.AI_SUPPORTS_IMAGES,
     AI_TIMEOUT_MS: process.env.AI_TIMEOUT_MS,
     AI_MAX_RETRIES: process.env.AI_MAX_RETRIES,
     AI_MAX_INPUT_CHARS: process.env.AI_MAX_INPUT_CHARS,
@@ -77,6 +96,10 @@ export function inspectModelConfig():
         maxRetries: env.AI_MAX_RETRIES,
         maxInputChars: env.AI_MAX_INPUT_CHARS,
         jsonMode: env.AI_JSON_MODE,
+        // Honoured even for the mock provider, so the photograph path can be
+        // demonstrated without a key. The mock replies honestly that it cannot
+        // see, rather than pretending to read the image.
+        supportsImages: env.AI_SUPPORTS_IMAGES,
       },
     };
   }
@@ -99,6 +122,7 @@ export function inspectModelConfig():
       maxRetries: env.AI_MAX_RETRIES,
       maxInputChars: env.AI_MAX_INPUT_CHARS,
       jsonMode: env.AI_JSON_MODE,
+      supportsImages: env.AI_SUPPORTS_IMAGES,
     },
   };
 }

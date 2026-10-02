@@ -1,4 +1,9 @@
-import type { ChatMessage, ChatProvider, CompletionResult } from "./provider";
+import type {
+  ChatContentPart,
+  ChatMessage,
+  ChatProvider,
+  CompletionResult,
+} from "./provider";
 
 /**
  * A deterministic, offline stand-in for a model.
@@ -19,13 +24,36 @@ import type { ChatMessage, ChatProvider, CompletionResult } from "./provider";
 const START_MARKER = "<<<DOCUMENT";
 const END_MARKER = "DOCUMENT>>>";
 
+/** Join the text parts of a message, whichever shape the content arrived in. */
+function messageText(content: string | ChatContentPart[]): string {
+  if (typeof content === "string") return content;
+  return content
+    .map((part) => (part.type === "text" ? part.text : ""))
+    .filter((text) => text.length > 0)
+    .join("\n");
+}
+
+function messageHasImage(content: string | ChatContentPart[]): boolean {
+  return (
+    Array.isArray(content) && content.some((part) => part.type === "image_url")
+  );
+}
+
+/**
+ * Pull the document out of the prompt.
+ *
+ * Returns an empty string when the prompt carries no document text — which is
+ * exactly the case for a photograph on its own. Falling back to the whole
+ * prompt (the earlier behaviour) would have produced a confident reading of the
+ * *instructions*, which is worse than reading nothing.
+ */
 function extractDocument(messages: ChatMessage[]): string {
   const lastUser = [...messages].reverse().find((m) => m.role === "user");
   if (!lastUser) return "";
-  const text = lastUser.content;
+  const text = messageText(lastUser.content);
   const start = text.indexOf(START_MARKER);
   const end = text.lastIndexOf(END_MARKER);
-  if (start === -1 || end === -1 || end <= start) return text;
+  if (start === -1 || end === -1 || end <= start) return "";
   return text.slice(start + START_MARKER.length, end).trim();
 }
 
@@ -106,6 +134,32 @@ function buildReading(document: string): Record<string, unknown> {
   };
 }
 
+/**
+ * The honest answer when a photograph arrives at a provider that cannot see.
+ *
+ * It is a complete, schema-valid reading that says, in the reader's words,
+ * "nothing was read". Returning an empty or malformed object instead would
+ * have surfaced as a confusing validation error.
+ */
+function buildImageReading(): Record<string, unknown> {
+  return {
+    documentType: "Photograph of a document",
+    whatThisIs:
+      "Nothing was read. This app is running with the built-in offline provider, which cannot look at images.",
+    summary:
+      "A photograph was sent, but the offline provider has no ability to see it, so no explanation was produced. Set AI_PROVIDER=openai-compatible with a vision-capable model to read photographs, or paste the text of the document instead.",
+    sender: null,
+    keyFacts: [],
+    actions: [],
+    watchOutFor: [],
+    questionsToAsk: [],
+    uncertainAbout: [
+      "The photograph was not read at all — the offline provider cannot see images.",
+    ],
+    confidence: "low",
+  };
+}
+
 export class MockProvider implements ChatProvider {
   readonly id = "mock";
   readonly model = "mock-deterministic";
@@ -113,9 +167,16 @@ export class MockProvider implements ChatProvider {
   async complete(messages: ChatMessage[]): Promise<CompletionResult> {
     // A tiny delay keeps the loading states honest in development.
     await new Promise((resolve) => setTimeout(resolve, 120));
-    return {
-      model: this.model,
-      text: JSON.stringify(buildReading(extractDocument(messages))),
-    };
+
+    const lastUser = [...messages].reverse().find((m) => m.role === "user");
+    const document = extractDocument(messages);
+    const sawImage = lastUser ? messageHasImage(lastUser.content) : false;
+
+    const reading =
+      document.length === 0 && sawImage
+        ? buildImageReading()
+        : buildReading(document);
+
+    return { model: this.model, text: JSON.stringify(reading) };
   }
 }

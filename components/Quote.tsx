@@ -9,9 +9,17 @@
 export function Quote({
   text,
   verified,
+  suppressWarning = false,
 }: {
   text: string;
   verified: boolean;
+  /**
+   * True when nothing could be checked at all — for example a reading taken
+   * from a photograph with no text to compare against. Showing "we could not
+   * find this wording" on every line would be both wrong and alarming; the
+   * result view explains the situation once, instead.
+   */
+  suppressWarning?: boolean;
 }) {
   return (
     <blockquote className="print-block mt-2 border-l-2 border-line-strong pl-3">
@@ -20,7 +28,7 @@ export function Quote({
         {text}
         <span aria-hidden="true">&rdquo;</span>
       </p>
-      {!verified && (
+      {!verified && !suppressWarning && (
         <p className="mt-1 text-xs font-medium text-warn">
           <span aria-hidden="true">⚠ </span>
           We could not find this exact wording in the document you gave us.

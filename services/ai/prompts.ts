@@ -1,4 +1,4 @@
-import type { ChatMessage } from "./provider";
+import type { ChatContentPart, ChatMessage } from "./provider";
 import { languageLabel } from "@/lib/languages";
 import type { ExplainInput } from "./schemas";
 
@@ -59,6 +59,14 @@ actions.instruction, watchOutFor.note, questionsToAsk and uncertainAbout in the
 requested explanation language. The "quote" fields stay in the document's
 original language, untouched.
 
+WHERE THE DOCUMENT COMES FROM
+It arrives either as text between the markers <<<DOCUMENT and DOCUMENT>>>, or as
+a photograph, or both. Read it from wherever it is.
+If it is a photograph: copy quotes from what you can genuinely read in the
+image. Anything smudged, cropped, angled or too small to read goes into
+uncertainAbout — describe what you could not read. Never reconstruct a sentence
+you could not see.
+
 CONFIDENCE
 "high" — the document is legible and its purpose is unambiguous.
 "medium" — mostly legible; something important is missing or unclear.
@@ -76,31 +84,72 @@ Use exactly these keys:
 Limits: keyFacts max 12, actions max 8, watchOutFor max 6, questionsToAsk max 6,
 uncertainAbout max 6. Empty arrays are allowed and honest.`;
 
-export function buildDocumentBlock(
+/**
+ * Build the user turn.
+ *
+ * Returns a plain string for a text document, and an array of content parts
+ * when a photograph is attached — the OpenAI-compatible wire format for
+ * multimodal input. A data URL carries the bytes; nothing is uploaded anywhere
+ * except the endpoint you configured.
+ */
+export function buildUserContent(
   input: ExplainInput,
   documentText: string,
   truncated: boolean,
-): string {
+): string | ChatContentPart[] {
   const reader = input.readerContext?.trim();
+  const hasText = documentText.length > 0;
 
-  return [
+  const lines = [
     `EXPLANATION LANGUAGE: ${languageLabel(input.language)} (${input.language})`,
     `READER CONTEXT: ${
       reader && reader.length > 0
         ? reader
         : "not provided — assume a careful adult with no specialist knowledge"
     }`,
-    truncated
-      ? "NOTE: the text below was cut short because the document is very long. If it stops mid-thought, say so in uncertainAbout."
-      : "NOTE: the text below is the whole document.",
-    "",
-    'DOCUMENT TEXT — copy every "quote" from here, exactly as written:',
-    "<<<DOCUMENT",
-    documentText,
-    "DOCUMENT>>>",
-    "",
-    "Reply with only the JSON object.",
-  ].join("\n");
+  ];
+
+  if (input.image && !hasText) {
+    lines.push(
+      "NOTE: the document is the photograph attached to this message. No text version was provided.",
+      "Read the photograph, and copy every quote exactly as it appears in the image.",
+    );
+  } else if (input.image) {
+    lines.push(
+      "NOTE: the document is the photograph attached to this message. A transcription is also given between the markers; prefer the photograph wherever the two disagree.",
+    );
+  } else {
+    lines.push(
+      truncated
+        ? "NOTE: the text below was cut short because the document is very long. If it stops mid-thought, say so in uncertainAbout."
+        : "NOTE: the text below is the whole document.",
+    );
+  }
+
+  if (hasText) {
+    lines.push(
+      "",
+      'DOCUMENT TEXT — copy every "quote" from here, exactly as written:',
+      "<<<DOCUMENT",
+      documentText,
+      "DOCUMENT>>>",
+    );
+  }
+
+  lines.push("", "Reply with only the JSON object.");
+
+  const instructions = lines.join("\n");
+  if (!input.image) return instructions;
+
+  return [
+    { type: "text", text: instructions },
+    {
+      type: "image_url",
+      image_url: {
+        url: `data:${input.image.mediaType};base64,${input.image.dataBase64}`,
+      },
+    },
+  ];
 }
 
 /**

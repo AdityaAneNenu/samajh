@@ -91,6 +91,18 @@ export function ResultView({ result }: { result: ExplainResult }) {
           </p>
         )}
 
+        {result.groundingSkipped && (
+          <p
+            role="status"
+            className="mt-3 rounded border border-warn/30 bg-warn-soft p-3 text-sm text-warn"
+          >
+            This reading came from a photograph, so we had no text to check the
+            quoted lines against. Please compare the quotes with the paper in
+            your hand before you act on anything here &mdash; or paste the text
+            next time and we will check every line for you.
+          </p>
+        )}
+
         {result.unverifiedQuotes > 0 && (
           <p
             role="status"
@@ -136,7 +148,11 @@ export function ResultView({ result }: { result: ExplainResult }) {
                   Date mentioned: {action.deadline}
                 </p>
               )}
-              <Quote text={action.quote} verified={action.verified} />
+              <Quote
+                text={action.quote}
+                verified={action.verified}
+                suppressWarning={result.groundingSkipped}
+              />
             </div>
           ))}
         </Section>
@@ -155,7 +171,11 @@ export function ResultView({ result }: { result: ExplainResult }) {
                   {fact.label}
                 </dt>
                 <dd className="text-base text-ink">{fact.value}</dd>
-                <Quote text={fact.quote} verified={fact.verified} />
+                <Quote
+                  text={fact.quote}
+                  verified={fact.verified}
+                  suppressWarning={result.groundingSkipped}
+                />
               </div>
             ))}
           </dl>
@@ -184,7 +204,11 @@ export function ResultView({ result }: { result: ExplainResult }) {
               className="rounded-lg border border-line bg-surface p-4 print-block"
             >
               <p className="text-ink">{item.note}</p>
-              <Quote text={item.quote} verified={item.verified} />
+              <Quote
+                text={item.quote}
+                verified={item.verified}
+                suppressWarning={result.groundingSkipped}
+              />
             </div>
           ))}
         </Section>
@@ -230,8 +254,9 @@ export function ResultView({ result }: { result: ExplainResult }) {
           <div>
             <dt className="inline font-medium">Quotes checked: </dt>
             <dd className="inline">
-              {result.quotesChecked} checked, {result.unverifiedQuotes} not
-              found in the document
+              {result.groundingSkipped
+                ? "not checked — no text version was supplied to compare against"
+                : `${result.quotesChecked} checked, ${result.unverifiedQuotes} not found in the document`}
             </dd>
           </div>
         </dl>

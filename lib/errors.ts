@@ -14,6 +14,7 @@ export type AiErrorKind =
   | "unavailable"
   | "network"
   | "invalid_response"
+  | "unsupported_input"
   | "too_large"
   | "unknown";
 
@@ -59,6 +60,11 @@ const USER_FACING: Record<AiErrorKind, UserFacingError> = {
     status: 413,
     message:
       "This document is too long to read in one go. Try one page or one section at a time.",
+  },
+  unsupported_input: {
+    status: 400,
+    message:
+      "This one is set up to read text, not photographs. Paste the text of the document instead.",
   },
   unknown: {
     status: 500,

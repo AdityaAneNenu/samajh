@@ -5,8 +5,8 @@ import { getModelConfig, inspectModelConfig, type ModelConfig } from "./model";
 import { MockProvider } from "./mock";
 import { normalizeExplanation } from "./normalize";
 import {
-  buildDocumentBlock,
   buildRepairInstruction,
+  buildUserContent,
   PROMPT_VERSION,
   SYSTEM_PROMPT,
 } from "./prompts";
@@ -50,6 +50,12 @@ export interface AiStatus {
   missing: string[];
   /** How much text the server will send to the model, so the UI can warn early. */
   maxInputChars: number | null;
+  /**
+   * Whether the configured model can read a photograph of a document. The UI
+   * hides the photo input entirely when this is false, rather than offering a
+   * control that cannot work.
+   */
+  supportsImages: boolean;
   promptVersion: string;
 }
 
@@ -63,6 +69,7 @@ export function getAiStatus(): AiStatus {
       model: null,
       missing: inspected.missing,
       maxInputChars: null,
+      supportsImages: false,
       promptVersion: PROMPT_VERSION,
     };
   }
@@ -72,6 +79,7 @@ export function getAiStatus(): AiStatus {
     model: inspected.config.model,
     missing: [],
     maxInputChars: inspected.config.maxInputChars,
+    supportsImages: inspected.config.supportsImages,
     promptVersion: PROMPT_VERSION,
   };
 }
@@ -153,16 +161,30 @@ export async function explainDocument(
   const config = dependencies.config ?? getModelConfig();
   const provider = dependencies.provider ?? providerFromConfig(config);
 
-  // Bound the request before it leaves the server: less latency, less cost,
-  // and less of someone's private document travelling than necessary.
-  const truncated = input.text.length > config.maxInputChars;
+  // A photograph is only meaningful if the configured model can actually see.
+  // Failing here is far better than sending an image to a text-only model and
+  // returning a confident reading of nothing.
+  if (input.image && !config.supportsImages) {
+    throw new AiError(
+      "unsupported_input",
+      "An image was supplied but this deployment reads text only",
+      { detail: "AI_SUPPORTS_IMAGES is not enabled" },
+    );
+  }
+
+  const sourceText = input.text ?? "";
+  const truncated = sourceText.length > config.maxInputChars;
   const documentText = truncated
-    ? input.text.slice(0, config.maxInputChars)
-    : input.text;
+    ? sourceText.slice(0, config.maxInputChars)
+    : sourceText;
+
+  // With no text there is nothing to verify quotes against. That is reported,
+  // never glossed over.
+  const groundingSkipped = documentText.trim().length === 0;
 
   const messages: ChatMessage[] = [
     { role: "system", content: SYSTEM_PROMPT },
-    { role: "user", content: buildDocumentBlock(input, documentText, truncated) },
+    { role: "user", content: buildUserContent(input, documentText, truncated) },
   ];
 
   const firstAttempt = await provider.complete(messages, { jsonMode: true });
@@ -198,9 +220,12 @@ export async function explainDocument(
   }
 
   const explanation = outcome.value;
-  const grounding = annotateGrounding(explanation, documentText);
+  const grounding = annotateGrounding(
+    explanation,
+    groundingSkipped ? "" : documentText,
+  );
 
-  if (grounding.unverified > 0) {
+  if (!groundingSkipped && grounding.unverified > 0) {
     // Logs item labels only — never the document, never the quotes.
     console.warn(
       `[samajh] ${grounding.unverified}/${grounding.checked} quotes were not found in the source document`,
@@ -217,7 +242,8 @@ export async function explainDocument(
     truncated,
     model,
     elapsedMs: Date.now() - startedAt,
-    quotesChecked: grounding.checked,
-    unverifiedQuotes: grounding.unverified,
+    quotesChecked: groundingSkipped ? 0 : grounding.checked,
+    unverifiedQuotes: groundingSkipped ? 0 : grounding.unverified,
+    groundingSkipped,
   };
 }

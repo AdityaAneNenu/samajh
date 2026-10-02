@@ -1,10 +1,15 @@
+import { MAX_REQUEST_BYTES } from "@/lib/constants";
+
 /**
  * Small request-hygiene helpers. Kept dependency-free and pure so they are
  * trivial to test.
  */
 
-/** Largest request body we will even look at, before validation runs. */
-export const MAX_REQUEST_BYTES = 512 * 1024;
+/**
+ * Largest request body we will even look at, before validation runs.
+ * Re-exported from `lib/constants` so the browser and the server agree on it.
+ */
+export { MAX_REQUEST_BYTES };
 
 export function contentLengthExceeds(
   request: Request,
