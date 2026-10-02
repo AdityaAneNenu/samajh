@@ -9,7 +9,12 @@ import {
   type FormEvent,
 } from "react";
 import { ResultView } from "./ResultView";
-import { MIN_TEXT_LENGTH } from "@/lib/constants";
+import {
+  MAX_REQUEST_BYTES,
+  MAX_TEXT_FILE_BYTES,
+  MIN_TEXT_LENGTH,
+} from "@/lib/constants";
+import { isPdfFile, isPlainTextFile } from "@/lib/files";
 import { formatBytes, isAcceptedImage, prepareImage } from "@/lib/image";
 import { toPlainText } from "@/lib/format";
 import { DEFAULT_LANGUAGE, LANGUAGES } from "@/lib/languages";
@@ -49,6 +54,7 @@ export function Reader({ status }: { status: AiStatus }) {
   const [notice, setNotice] = useState<string | null>(null);
   const [photo, setPhoto] = useState<PreparedImage | null>(null);
   const [photoBusy, setPhotoBusy] = useState(false);
+  const [fileBusy, setFileBusy] = useState(false);
 
   const resultRef = useRef<HTMLDivElement | null>(null);
   const errorRef = useRef<HTMLDivElement | null>(null);
@@ -69,26 +75,96 @@ export function Reader({ status }: { status: AiStatus }) {
   const canSubmit =
     status.ready && (hasEnoughText || photo !== null) && phase !== "loading";
 
-  const handleFile = useCallback(async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    setNotice(null);
+  /**
+   * A text file is read locally, with no round trip. A PDF is sent to the
+   * server to have its text pulled out, and the result is put straight into the
+   * box below — so the reader sees exactly what will be analysed, and every
+   * quote is later checked against that same text.
+   */
+  const handleFile = useCallback(
+    async (event: ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0];
+      // Allow the same file to be chosen twice in a row.
+      event.target.value = "";
+      if (!file) return;
 
-    if (file.size > 400_000) {
-      setNotice(
-        "That file is large. It is easier on everyone to read one section at a time.",
-      );
-      return;
-    }
+      setNotice(null);
 
-    try {
-      setText(await file.text());
-    } catch {
-      setNotice(
-        "We could not open that file. Try copying the text and pasting it instead.",
-      );
-    }
-  }, []);
+      if (isPdfFile(file)) {
+        if (file.size > MAX_REQUEST_BYTES) {
+          setNotice("That PDF is too large to read. Try one section at a time.");
+          return;
+        }
+
+        setFileBusy(true);
+        try {
+          const response = await fetch("/api/extract-text", {
+            method: "POST",
+            headers: { "content-type": "application/pdf" },
+            body: file,
+          });
+
+          const payload = (await response.json().catch(() => null)) as
+            | { text: string; pages: number; truncated: boolean }
+            | { error?: string }
+            | null;
+
+          if (!response.ok) {
+            setNotice(
+              (payload as { error?: string } | null)?.error ??
+                "We could not read that PDF. Try another file, or paste the text instead.",
+            );
+            return;
+          }
+
+          const document = payload as {
+            text: string;
+            pages: number;
+            truncated: boolean;
+          };
+
+          setText(document.text);
+          setNotice(
+            `Read ${document.pages} page${
+              document.pages === 1 ? "" : "s"
+            } of text. Check it looks right below, then press "Read it for me".${
+              document.truncated ? " Only the beginning was kept." : ""
+            }`,
+          );
+        } catch {
+          setNotice(
+            "We could not reach the app to read that PDF. Check your internet connection and try again.",
+          );
+        } finally {
+          setFileBusy(false);
+        }
+        return;
+      }
+
+      if (!isPlainTextFile(file)) {
+        setNotice(
+          "That file is neither text nor a PDF. Try a .txt, .md, .csv or .pdf.",
+        );
+        return;
+      }
+
+      if (file.size > MAX_TEXT_FILE_BYTES) {
+        setNotice(
+          "That file is large. It is easier on everyone to read one section at a time.",
+        );
+        return;
+      }
+
+      try {
+        setText(await file.text());
+      } catch {
+        setNotice(
+          "We could not open that file. Try copying the text and pasting it instead.",
+        );
+      }
+    },
+    [],
+  );
 
   const handlePhoto = useCallback(
     async (event: ChangeEvent<HTMLInputElement>) => {
@@ -339,21 +415,30 @@ export function Reader({ status }: { status: AiStatus }) {
             htmlFor="document-file"
             className="block text-sm font-medium text-ink"
           >
-            Or add a text file
+            Or add a file
           </label>
           <input
             id="document-file"
             name="file"
             type="file"
-            accept=".txt,.md,.csv,.log,.json,text/plain"
+            accept=".txt,.md,.csv,.log,.json,text/plain,application/pdf,.pdf"
             onChange={handleFile}
+            aria-describedby="document-file-hint"
             className="mt-2 block w-full text-sm text-muted file:mr-3 file:rounded-md file:border file:border-line-strong file:bg-surface file:px-3 file:py-2 file:text-sm file:font-medium file:text-ink"
           />
-          <p className="mt-1 text-xs text-muted">
+          <p id="document-file-hint" className="mt-1 text-xs text-muted">
+            Plain text (.txt, .md, .csv) or a PDF. A PDF&rsquo;s text is read out
+            and put in the box above, so you can check it before anything is
+            analysed.
             {status.supportsImages
-              ? "Plain text only — .txt, .md or .csv. For a photograph, use the photo box above."
-              : "Plain text only. Photographing a paper letter needs a model that can see — see the README."}
+              ? " For a photograph of a page, use the photo box above."
+              : " Photographing a page needs a model that can see — see the README."}
           </p>
+          {fileBusy && (
+            <p role="status" className="mt-2 text-xs text-muted">
+              Reading the file&hellip;
+            </p>
+          )}
         </div>
 
         <div className="grid gap-5 sm:grid-cols-2">
@@ -408,7 +493,7 @@ export function Reader({ status }: { status: AiStatus }) {
           <button
             type="submit"
             className={BUTTON_PRIMARY}
-            disabled={phase === "loading"}
+            disabled={phase === "loading" || fileBusy || photoBusy}
             aria-busy={phase === "loading"}
           >
             {phase === "loading" ? "Reading…" : "Read it for me"}

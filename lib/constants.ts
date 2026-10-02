@@ -19,6 +19,9 @@ export const MAX_TEXT_CHARS = 200_000;
  */
 export const MAX_REQUEST_BYTES = 8 * 1024 * 1024;
 
+/** A text file we read locally. Bigger than this and it is a book, not a letter. */
+export const MAX_TEXT_FILE_BYTES = 400_000;
+
 /** Media types the reader will accept for a photo of a document. */
 export const IMAGE_MEDIA_TYPES = [
   "image/jpeg",

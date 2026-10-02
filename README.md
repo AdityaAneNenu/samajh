@@ -50,10 +50,13 @@ it slowly — is checkable.**
 
 - **One screen, one flow.** Add the text, choose a language, press *Read it for me*. No
   accounts, no settings, no dashboards.
-- **Text or a photograph.** Paste the words, add a plain-text file, or photograph the page.
-  A photo is shrunk on the reader's own device before anything is sent anywhere. The photo box
-  appears only when the configured model can actually see, and when a reading comes from a
-  photo with no text to compare against, that is stated plainly rather than quietly passing.
+- **Text, a PDF, or a photograph.** Paste the words, add a `.txt`/`.md`/`.csv`, upload a PDF
+  (its text is pulled out and shown back to you before anything is analysed), or photograph
+  the page. A photo is shrunk on the reader's own device before anything is sent anywhere.
+- **See every quote in its place.** Each fact, action and caution carries the line number it
+  came from, and can be expanded to show the surrounding sentences with the quoted words
+  highlighted — so the reader compares against the paper in their hand instead of trusting a
+  summary.
 - **Plain-language explanation in 12 languages**, including Telugu, Hindi, Tamil, Bengali,
   Marathi, Kannada, Malayalam, Gujarati, Punjabi, Urdu and Spanish.
 - **Grounded output.** Model output is schema-validated, then every quote is verified
@@ -224,23 +227,29 @@ app/
   layout.tsx              App shell: landmarks, skip link, disclaimer, print styles
   page.tsx                Resolves AI status server-side, renders the reader
   globals.css             Design tokens, focus styles, reduced-motion, print rules
+  icon.svg                Favicon: a document with the quote line picked out
   error.tsx               Error boundary: calm message, opaque code, retry
   not-found.tsx           A friendly 404 that points back at the reader
   api/explain/route.ts    The only endpoint that touches a model
+  api/extract-text/route.ts  PDF → text, so the reader sees what was read
+  api/health/route.ts     Liveness and readiness for containers; leaks nothing
 components/
-  Reader.tsx              Client component: form, photo, states, focus management
+  Reader.tsx              Client component: text, photo, PDF, states, focus
   ResultView.tsx          Presentational result — every section, including uncertainty
   Quote.tsx               A quote, plus its verified/unverified marking
+  QuoteLocation.tsx       The quote in context, with the match highlighted
 lib/
   constants.ts            Every limit, shared by server and browser, zero deps
   errors.ts               AiError: kinds, user-facing messages, secret redaction
-  grounding.ts            Quote verification against the source
+  files.ts                Is this a PDF? Is this text? (dependency-free)
+  grounding.ts            Quote verification, and locating a quote in the source
   image.ts                Browser-side photograph preparation (shrink, re-encode)
   json.ts                 Recover JSON from fences, prose and trailing commas
   format.ts               Plain-text rendering for copy and print
   http.ts                 Origin check, body-size guard, client identity
   rateLimit.ts            In-memory fixed-window limiter
   languages.ts            The language list, in one place
+  pdf.ts                  Server-only PDF text extraction (unpdf)
 services/ai/
   index.ts                Orchestrator: validate → call → repair → verify
   provider.ts             OpenAI-compatible adapter (the only network code)
@@ -251,7 +260,10 @@ services/ai/
   mock.ts                 Deterministic offline provider, honestly labelled as such
 docs/
   dev-post-draft.md       The DEV Challenge write-up, staged and paste-ready
-tests/                    120 tests across 12 files
+tests/                    153 tests across 16 files, plus a PDF fixture builder
+Dockerfile                Three-stage image; no secret baked in, runs non-root
+render.yaml               Render Blueprint; every credential marked sync: false
+.dockerignore             Keeps the build context small
 ```
 
 ## Quickstart
@@ -301,6 +313,50 @@ value) in the UI and the server log.
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run lint` | ESLint, including accessibility rules |
 | `npm run verify` | typecheck → lint → test → build |
+
+## Running it somewhere
+
+Three ways, in increasing order of effort. **No secret is ever baked into an image or a
+repository file** — the `AI_*` values are read from the environment at run time, so the same
+build can be deployed anywhere.
+
+**Vercel** — import the repository and add the `AI_*` environment variables in the dashboard.
+Next.js is detected automatically; no configuration needed.
+
+**Render** — `render.yaml` is a Blueprint: **New → Blueprint**, point it at the repository.
+Every credential is marked `sync: false`, which means Render prompts for it instead of reading
+it from the file. Check it against the current
+[Blueprint spec](https://render.com/docs/blueprint-spec) before relying on it.
+
+**Docker, anywhere** — the image is three stages and runs as a non-root user:
+
+```bash
+docker build -t samajh .
+docker run --rm -p 3000:3000 \
+  -e AI_PROVIDER=openai-compatible \
+  -e AI_BASE_URL=https://your-provider.example.com/v1 \
+  -e AI_MODEL=your-open-weight-model-id \
+  -e AI_API_KEY=... \
+  samajh
+```
+
+The build uses `output: "standalone"`, so the final image carries no `node_modules` — only
+traced files. Secrets are removed from the build context by `.dockerignore`.
+
+**Health checking.** `GET /api/health` answers promptly with:
+
+```json
+{ "status": "ok", "aiReady": true, "provider": "openai-compatible", "supportsImages": false, "promptVersion": "2026-10-03.1" }
+```
+
+It answers `200` even when `aiReady` is `false`, deliberately: the app is working correctly, it
+is simply unconfigured and says so on screen. A `5xx` would make an orchestrator restart a
+container that has nothing wrong with it. The response never contains the credential.
+
+**A note on the offline demo.** Set `AI_PROVIDER=mock` on any of these and the whole flow —
+including the PDF path and the photograph UI — runs with no key and no cost. The provider
+states in its own output that no language model read the document, and always reports
+`confidence: "low"`.
 
 ---
 
@@ -377,23 +433,28 @@ This is the target user's requirement, not a checklist item:
 
 ## Testing
 
-**120 tests across 12 files**, all passing, with **no network access and no API key** — the
-provider is stubbed and the offline provider is real code.
+**153 tests across 16 files**, all passing, with **no network access and no API key** — the
+provider is stubbed, the offline provider is real code, and the PDF fixture is a genuine
+well-formed PDF built byte by byte.
 
 | File | Covers |
 | --- | --- |
 | `tests/ai.test.ts` | The orchestrator: happy path, prompt contents, fence handling, repair-on-invalid, double-failure, truncation, invented quotes, photographs, missing configuration |
 | `tests/route.test.ts` | The trust boundary: origin check, size cap, rate limiting, malformed JSON, field-level errors, the config error, image rejection |
+| `tests/extractRoute.test.ts` | The PDF endpoint: extraction, non-PDF, no-text-layer, oversize, cross-origin, rate limit |
+| `tests/healthRoute.test.ts` | Readiness reporting, and that the credential is never echoed |
 | `tests/provider.test.ts` | The wire format: request shape, retries, retry-then-succeed, no-retry-on-4xx, `response_format` fallback, credential redaction, empty completion, array content |
 | `tests/prompts.test.ts` | The safety rules: no advice, exact quotes or omission, gaps reported, photograph handling, exact JSON keys, wired into the prompt |
-| `tests/grounding.test.ts` | Quote verification: exact, whitespace, punctuation, ellipsis, invented quotes, per-item marking |
+| `tests/grounding.test.ts` | Verification, and locating a quote: exact, case, line breaks, ellipsis, invented quotes, line numbers, trimmed context |
+| `tests/pdf.test.ts` | Real extraction from a real PDF, the magic-byte check, whitespace tidying, scans, damaged files |
 | `tests/normalize.test.ts` | Near-miss shapes: snake_case, synonyms, half-filled items, bad confidence values |
 | `tests/json.test.ts` | Recovery of JSON from fences, prose and trailing commas |
 | `tests/errors.test.ts` | Status→kind mapping, retryability, message hygiene, secret redaction |
 | `tests/http.test.ts` | Same-origin enforcement, the body-size guard, client identity |
+| `tests/files.test.ts` | PDF and text file recognition, including the near-miss cases |
 | `tests/image.test.ts` | Accepted photo formats, base64 size arithmetic, human-readable sizes |
 | `tests/format.test.ts` | The plain-text rendering that gets copied and printed |
-| `tests/rateLimit.test.ts` | Window behaviour with an injected clock |
+| `tests/rateLimit.test.ts` | Window behaviour, with an injected clock |
 
 ```bash
 npm run verify     # typecheck → lint → test → build
@@ -448,18 +509,18 @@ the configured key *and* any credential-shaped string, and is tested with a real
 
 Being explicit about the edges, because the brief matters more than the surface area:
 
-- **No PDF input or built-in OCR.** Text is pasted or read from a plain-text file; photographs
-  go to a vision-capable model. A PDF has to be copied from, or its pages photographed, rather
-  than uploaded — which also keeps the many-headed problem of PDF text extraction out of a
-  two-day build.
+- **No built-in OCR.** A scanned PDF has no text layer, and this deliberately does not guess:
+  it says so and points at the photograph path, which needs a vision-capable model. Genuinely
+  reading a scan would mean running an OCR model, which is a different project.
 - **No accounts, database, history or analytics.** A reported document is a financial or
   medical record. Storing it would be a liability, not a feature.
 - **No streaming.** The result is a structured object, not prose; there is nothing useful to
   stream, and the schema can only be validated once it is complete.
 - **The explanation is translated; the surrounding interface is not.** The chrome is English.
   The document's meaning — the part that matters — is in the reader's language.
-- **No per-item diff highlighting** against the original text. Items are marked verified or
-  not, but the app doesn't yet show *where* in the source each quote was found.
+- **No side-by-side document view.** Quotes are located in the source and shown in context,
+  but the original is not rendered as a two-pane diff — this is used on a phone, in one hand,
+  holding the letter in the other.
 - **No spending cap** beyond the rate limiter. A production deployment would want a hard
   budget, not 8 requests per 5 minutes per IP.
 
@@ -468,7 +529,8 @@ Being explicit about the edges, because the brief matters more than the surface 
 This project is **MIT licensed** — see `LICENSE` (© 2026 Duggi Venkata Siva Lalitaaditya).
 
 Built on open-source work: [Next.js](https://nextjs.org), [React](https://react.dev),
-[Tailwind CSS](https://tailwindcss.com), [Zod](https://zod.dev) and
+[Tailwind CSS](https://tailwindcss.com), [Zod](https://zod.dev),
+[unpdf](https://github.com/unjs/unpdf) (MIT, for PDF text extraction) and
 [Vitest](https://vitest.dev). The application's AI runs on an **open-weight model** served by
 whatever OpenAI-compatible endpoint you configure — this repository contains no vendor SDK.
 

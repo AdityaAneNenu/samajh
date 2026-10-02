@@ -38,9 +38,10 @@ You give it a letter. It gives you back five things:
 5. **What is easy to miss** — auto-renewals, penalties, conditions — plus **what the reader
    is not sure about**.
 
-It accepts pasted text, a plain-text file, or a photograph of the page. It speaks twelve
-languages, including Telugu, Hindi, Tamil, Bengali, Marathi, Kannada, Malayalam, Gujarati,
-Punjabi and Urdu.
+It accepts pasted text, a `.txt`/`.md`/`.csv`, a PDF (the text is pulled out and shown back to
+you before anything is analysed), or a photograph of the page. It speaks twelve languages,
+including Telugu, Hindi, Tamil, Bengali, Marathi, Kannada, Malayalam, Gujarati, Punjabi and
+Urdu.
 
 ## Why the quotes matter more than the summary
 
@@ -60,6 +61,11 @@ Verification is deliberately forgiving about cosmetics — OCR turns `“` into 
 turns a non-breaking space into a space — and strict about substance. A quote that is not in
 the document is not in the document.
 
+And because a quote on its own proves nothing — it could be stitched together from three
+different paragraphs — every fact, action and caution carries **the line it came from**,
+expandable to show the surrounding sentences with the quoted words highlighted. The reader is
+never asked to take the quote on trust; they are shown its place in the document.
+
 **A tool someone cannot check is a tool they should not trust. A quote they can hold against
 the paper in their hand is checkable — even if they read slowly.**
 
@@ -68,7 +74,7 @@ the paper in their hand is checkable — even if they read slowly.**
 ```mermaid
 flowchart TB
     subgraph Browser["Browser — any phone"]
-        Form["Paste text · or photograph the page"]
+        Form["Paste text · PDF · or photograph the page"]
         View["Grounded facts · verified quotes"]
     end
     subgraph Server["Next.js server — the key only lives here"]
@@ -141,7 +147,7 @@ Two bugs that would otherwise have shipped: an action item that validated its qu
 returned the object without it, and an entire section — "worth reading twice" — that the
 normaliser silently discarded because cautions use `note` instead of `label`/`value`.
 
-**120 tests across 12 files, with no network access and no API key required.**
+**153 tests across 16 files, with no network access and no API key required.**
 
 ## What I learned
 

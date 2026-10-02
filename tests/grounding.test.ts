@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { annotateGrounding, isQuoteGrounded } from "@/lib/grounding";
+import { annotateGrounding, isQuoteGrounded, locateQuote } from "@/lib/grounding";
 import type { Explanation } from "@/services/ai/schemas";
 
 const SOURCE = `NOTICE
@@ -46,6 +46,72 @@ describe("isQuoteGrounded", () => {
 
   it("rejects a quote too short to be meaningful", () => {
     expect(isQuoteGrounded("Rs.", SOURCE)).toBe(false);
+  });
+});
+
+describe("locateQuote", () => {
+  it("finds an exact quote and reports the line it sits on", () => {
+    const location = locateQuote("A late payment surcharge of 2%", SOURCE);
+
+    expect(location).not.toBeNull();
+    expect(location?.line).toBe(4);
+    expect(location?.match).toBe("A late payment surcharge of 2%");
+    expect(location?.after).toContain("applies after the due date.");
+    // the preceding lines are shown as context, because that is the point
+    expect(location?.before).toContain("Amount payable");
+  });
+
+  it("handles a quote that a line break falls in the middle of", () => {
+    const source = "Amount payable:\n   Rs. 4,250 within 15 days";
+    const location = locateQuote("Amount payable: Rs. 4,250", source);
+
+    expect(location?.match).toBe("Amount payable: Rs. 4,250");
+    expect(location?.line).toBe(1);
+  });
+
+  it("counts lines the way a reader counts them", () => {
+    const location = locateQuote("three lines", "one\ntwo\nthree lines");
+    expect(location?.line).toBe(3);
+  });
+
+  it("ignores case and reports where the source's own wording is", () => {
+    const location = locateQuote("NOTICE", "hello\nnotice of demand");
+    expect(location?.line).toBe(2);
+    expect(location?.match).toBe("notice");
+  });
+
+  it("locates a quote that elides its middle with an ellipsis", () => {
+    const location = locateQuote(
+      "Your electricity connection number is 1234567 ... A late payment surcharge",
+      SOURCE,
+    );
+
+    expect(location).not.toBeNull();
+    expect(location?.match).toContain("Your electricity connection number is 1234567");
+    expect(location?.match).toContain("A late payment surcharge");
+  });
+
+  it("returns null rather than guessing when the quote is not there", () => {
+    expect(
+      locateQuote("Your connection will be disconnected on 1 January", SOURCE),
+    ).toBeNull();
+  });
+
+  it("returns null for a quote too short to place meaningfully", () => {
+    expect(locateQuote("Rs.", SOURCE)).toBeNull();
+  });
+
+  it("marks context as trimmed when the quote sits deep inside a long document", () => {
+    const long = `${"x ".repeat(400)}\nTARGET PHRASE HERE\n${"y ".repeat(400)}`;
+    const location = locateQuote("TARGET PHRASE HERE", long);
+
+    expect(location?.trimmed).toBe(true);
+    expect(location?.before.length).toBeLessThan(200);
+    expect(location?.after.length).toBeLessThan(200);
+  });
+
+  it("returns nothing at all when there is no source to search", () => {
+    expect(locateQuote("A late payment surcharge of 2%", "")).toBeNull();
   });
 });
 

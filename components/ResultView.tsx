@@ -152,6 +152,7 @@ export function ResultView({ result }: { result: ExplainResult }) {
                 text={action.quote}
                 verified={action.verified}
                 suppressWarning={result.groundingSkipped}
+                location={action.location}
               />
             </div>
           ))}
@@ -175,6 +176,7 @@ export function ResultView({ result }: { result: ExplainResult }) {
                   text={fact.quote}
                   verified={fact.verified}
                   suppressWarning={result.groundingSkipped}
+                  location={fact.location}
                 />
               </div>
             ))}
@@ -208,6 +210,7 @@ export function ResultView({ result }: { result: ExplainResult }) {
                 text={item.quote}
                 verified={item.verified}
                 suppressWarning={result.groundingSkipped}
+                location={item.location}
               />
             </div>
           ))}

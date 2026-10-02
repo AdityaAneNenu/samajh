@@ -1,0 +1,26 @@
+# Keep the build context small: the image only needs source and manifests.
+node_modules
+.next
+out
+build
+coverage
+
+.git
+.gitignore
+.vscode
+
+# Never ship an environment file. AI_* values arrive at run time.
+.env
+.env.local
+.env.*.local
+
+# Documentation is for the repository, not the runtime image.
+README.md
+docs
+*.md
+
+Dockerfile
+.dockerignore
+
+npm-debug.log*
+*.tsbuildinfo

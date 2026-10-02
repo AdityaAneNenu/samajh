@@ -1,3 +1,6 @@
+import { QuoteLocationBlock } from "./QuoteLocation";
+import type { QuoteLocation } from "@/services/ai/schemas";
+
 /**
  * A quote pulled from the original document.
  *
@@ -5,11 +8,15 @@
  * said plainly instead of being hidden. Showing an unverified quote is a
  * deliberate choice: silently dropping it would leave a gap the reader cannot
  * see, and silently trusting it would be a lie.
+ *
+ * When the quote *can* be located, the reader is offered the surrounding
+ * sentences — the difference between "trust me" and "look for yourself".
  */
 export function Quote({
   text,
   verified,
   suppressWarning = false,
+  location = null,
 }: {
   text: string;
   verified: boolean;
@@ -20,6 +27,8 @@ export function Quote({
    * result view explains the situation once, instead.
    */
   suppressWarning?: boolean;
+  /** Where the quote sits in the document, when it could be pinpointed. */
+  location?: QuoteLocation | null;
 }) {
   return (
     <blockquote className="print-block mt-2 border-l-2 border-line-strong pl-3">
@@ -34,6 +43,7 @@ export function Quote({
           We could not find this exact wording in the document you gave us.
         </p>
       )}
+      {location && <QuoteLocationBlock location={location} />}
     </blockquote>
   );
 }

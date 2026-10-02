@@ -120,7 +120,30 @@ export type ActionItem = z.infer<typeof actionSchema>;
 export type CautionItem = z.infer<typeof cautionSchema>;
 
 /** An item plus the result of checking its quote against the source. */
-export type Annotated<T> = T & { verified: boolean };
+export type Annotated<T> = T & {
+  verified: boolean;
+  /**
+   * Where the quote sits in the document the reader supplied, when it could be
+   * pinpointed. `null` means the quote passed the (deliberately forgiving)
+   * verification but its exact position could not be established — the reader
+   * is shown no location rather than a wrong one.
+   */
+  location: QuoteLocation | null;
+};
+
+/** A quote found inside the source text, with a little readable context. */
+export interface QuoteLocation {
+  /** 1-based line number where the quote begins, as the reader would count. */
+  line: number;
+  /** Up to a sentence or so of text before the quote. */
+  before: string;
+  /** The quote exactly as it appears in the source. */
+  match: string;
+  /** Up to a sentence or so of text after the quote. */
+  after: string;
+  /** True when `before` or `after` was cut short, so the UI can show an ellipsis. */
+  trimmed: boolean;
+}
 
 /**
  * What the API returns to the browser.

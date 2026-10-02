@@ -13,6 +13,7 @@ const RESULT: ExplainResult = {
       value: "Rs. 4,250",
       quote: "Amount payable: Rs. 4,250",
       verified: true,
+      location: null,
     },
   ],
   actions: [
@@ -21,6 +22,7 @@ const RESULT: ExplainResult = {
       deadline: "15 days",
       quote: "within 15 days",
       verified: true,
+      location: null,
     },
   ],
   watchOutFor: [
@@ -28,6 +30,7 @@ const RESULT: ExplainResult = {
       note: "A surcharge applies after the due date.",
       quote: "surcharge of 2%",
       verified: false,
+      location: null,
     },
   ],
   questionsToAsk: ["Is there any surcharge?"],

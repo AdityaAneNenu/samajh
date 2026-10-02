@@ -1,0 +1,30 @@
+# Render Blueprint — one-click deploy of this repository.
+#
+# Secrets are never stored here. Every AI_* value that carries a credential is
+# marked `sync: false`, which makes Render prompt for it in the dashboard
+# instead of reading it from this file.
+#
+# Verify against the current Blueprint specification before relying on it:
+# https://render.com/docs/blueprint-spec
+services:
+  - type: web
+    name: samajh
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    autoDeploy: true
+    # The app reports its own readiness, so this is a genuine health check.
+    healthCheckPath: /api/health
+    envVars:
+      - key: AI_PROVIDER
+        value: openai-compatible
+      # Set to true only if AI_MODEL can read photographs.
+      - key: AI_SUPPORTS_IMAGES
+        value: "true"
+      # Fill these in the dashboard. They are never read from this file.
+      - key: AI_BASE_URL
+        sync: false
+      - key: AI_MODEL
+        sync: false
+      - key: AI_API_KEY
+        sync: false
